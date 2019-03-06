@@ -1,0 +1,1 @@
+cl ..\sources\main.cpp

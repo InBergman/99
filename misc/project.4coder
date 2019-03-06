@@ -1,0 +1,7 @@
+version(1);
+
+project_name = "1st4coder_project";
+
+patterns = {"".cpp,"".h};
+
+blacklist_patterns = { ".*",}
