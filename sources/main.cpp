@@ -1,6 +1,13 @@
-
 #include <windows.h>
-#pragma comment(lib,"user32.lib")
+#endif
+#endif
+
+#define global_variable  static
+#define internal         static
+#define local_persist    static
+
+global_variable bool Running;
+
 
 LRESULT CALLBACK MainWindowCallBack(HWND Window,
                                     UINT Message,
@@ -23,6 +30,7 @@ LRESULT CALLBACK MainWindowCallBack(HWND Window,
         
         case WM_CLOSE:
         {
+            Running = false;
             OutputDebugStringA("WM_CLOSE\n");
         } break;
         
@@ -46,17 +54,16 @@ int CALLBACK WinMain(HINSTANCE Instance,
                      LPSTR commandLine,
                      int showCode)
 {
-    WNDCLASS WindowClass = {} ;
-    WindowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW ;
+    WNDCLASS WindowClass = {};
+    WindowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
     WindowClass.lpfnWndProc = MainWindowCallBack;
     WindowClass.hInstance = Instance;
     WindowClass.lpszClassName = "Bakaryu";
-    
     if(RegisterClass(&WindowClass))
     {
         HWND WindowHandle = CreateWindowEx(0,
                                            WindowClass.lpszClassName,
-                                           "Bakayaru",
+                                           "99",
                                            WS_OVERLAPPEDWINDOW|WS_VISIBLE,
                                            CW_USEDEFAULT,
                                            CW_USEDEFAULT,
@@ -68,7 +75,8 @@ int CALLBACK WinMain(HINSTANCE Instance,
                                            0);
         if(WindowHandle)
         {
-            for(;;)
+            Running = true;
+            while(Running)
             {
                 MSG Message;
                 BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
