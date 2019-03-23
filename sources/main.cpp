@@ -1,21 +1,141 @@
 #include <windows.h>
-#endif
-#endif
+#include <stdint.h>
 
-#define global_variable  static
-#define internal         static
-#define local_persist    static
+#define internal static
+#define global_variable static
+#define local_persist static
 
-global_variable bool Running;
+typedef int8_t int8;
+typedef int16_t int16;
+typedef int32_t int32;
+typedef int64_t int64;
+
+typedef uint8_t uint8;
+typedef uint16_t uint16;
+typedef uint32_t uint32;
+typedef uint64_t uint64;
+
+struct win32_offscreen_buffer
+{
+	BITMAPINFO Info;
+	void*      Memory;
+	int        Height;
+	int        Width;
+	int        Pitch;
+	int        BytesPerPixel;
+};
+
+struct win32_window_dimension
+{
+	int       Width;
+	int       Height;
+};
+
+global_variable bool GlobalRunning;
+global_variable win32_offscreen_buffer GlobalBackBuffer = {};
 
 
-LRESULT CALLBACK MainWindowCallBack(HWND Window,
-                                    UINT Message,
-                                    WPARAM wParam,
-                                    LPARAM lParam)
+global_variable BITMAPINFO BitmapInfo;
+//global_variable void *BitmapMemory;
+//global_variable int BitmapWidth;
+//global_variable int BitmapHeight;
+
+
+win32_window_dimension
+Win32GetWindowDimension(HWND Window)
+{
+	win32_window_dimension Result;
+	
+	RECT ClientRect;
+	GetClientRect(Window, &ClientRect);
+	Result.Width = ClientRect.right - ClientRect.left;
+	Result.Height = ClientRect.bottom - ClientRect.top;
+	
+	return(Result);
+}
+
+
+internal void
+Win32ResizeDIBSection(win32_offscreen_buffer *Buffer, int Width, int Height)
+{
+	
+	if(Buffer->Memory)
+	{
+		VirtualFree(Buffer->Memory, 0, MEM_RELEASE);
+	}
+	
+	Buffer->Width         = Width;
+	Buffer->Height        = Height;
+	Buffer->BytesPerPixel = 4;
+	
+	Buffer->Info.bmiHeader.biSize        = sizeof(Buffer->Info.bmiHeader);
+	Buffer->Info.bmiHeader.biWidth       = Buffer->Width;
+	Buffer->Info.bmiHeader.biHeight      = -Buffer->Height;
+	Buffer->Info.bmiHeader.biPlanes      = 1;
+	Buffer->Info.bmiHeader.biBitCount    = 32;
+	Buffer->Info.bmiHeader.biCompression = BI_RGB;
+	
+	
+	// NOTE(mehdi): Casey did explain that, to caclulate a square area 
+	// you need to multiply the height * Width, same way it apply 
+	// to calculate the memory needed to our bitmap square.
+	
+	
+	int BitmapMemorySize = (Buffer->Width * Buffer->Height) * Buffer->BytesPerPixel;
+	
+	Buffer->Memory       = VirtualAlloc(0, BitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+	Buffer->Pitch        = Width * Buffer->BytesPerPixel;
+}
+
+
+internal void
+RenderGradient(win32_offscreen_buffer Buffer, int BlueOffset, int GreenOffset)
+{
+	uint8 *Row = (uint8 *)Buffer.Memory;
+	
+	for(int Y = 0; Y < Buffer.Height; ++Y)
+	{
+		uint32 *Pixel = (uint32*)Row;
+		for(int X = 0; X < Buffer.Width; ++X)
+		{
+			uint8 Blue  = (X + BlueOffset);
+			uint8 Green = (Y + GreenOffset);
+			
+			*Pixel++ = ((Green << 8) | Blue);
+		}
+		Row += Buffer.Pitch;
+	}
+}
+
+
+internal void
+Win32DisplayBufferInWindow(HDC DeviceContext,
+						   int WindowWidth, 
+						   int WindowHeight,
+						   win32_offscreen_buffer Buffer,
+						   int X, int Y, int Width ,int Height)
+{
+	
+	StretchDIBits(DeviceContext,
+				  /*
+				  X, Y, Width, Height,
+				  X, Y, Width, Height,
+				  */
+				  0, 0, WindowWidth, WindowHeight,
+				  0, 0, Buffer.Width, Buffer.Height,
+				  Buffer.Memory, 
+				  &Buffer.Info,
+				  DIB_RGB_COLORS, SRCCOPY);
+}
+
+LRESULT CALLBACK 
+Win32MainWindowCallBack(HWND Window,
+						UINT Message,
+						WPARAM wParam,
+						LPARAM lParam)
 {
     LRESULT result = 0;
-    
+	
     switch(Message)
     {
         case WM_SIZE:
@@ -25,18 +145,38 @@ LRESULT CALLBACK MainWindowCallBack(HWND Window,
         
         case WM_DESTROY:
         {
+			GlobalRunning = false;
             OutputDebugStringA("WM_DESTROY\n");
         } break;
         
         case WM_CLOSE:
         {
-            Running = false;
+            GlobalRunning = false;
             OutputDebugStringA("WM_CLOSE\n");
         } break;
         
         case WM_ACTIVATEAPP:
         {
             OutputDebugStringA("WM_ACTIVATEAPP\n");
+        } break;
+		case WM_PAINT:
+        {
+			PAINTSTRUCT Paint;
+			HDC DeviceContext = BeginPaint(Window, &Paint);
+			
+			int X = Paint.rcPaint.left;
+			int Y = Paint.rcPaint.top;
+			int Width = Paint.rcPaint.right - Paint.rcPaint.left ;
+			int Height = Paint.rcPaint.bottom - Paint.rcPaint.top;
+			
+			win32_window_dimension Dimension = Win32GetWindowDimension(Window);
+			Win32DisplayBufferInWindow(DeviceContext, 
+									   Dimension.Width, 
+									   Dimension.Height,
+									   GlobalBackBuffer,
+									   X, Y, Width, Height);
+			EndPaint(Window, &Paint);
+            OutputDebugStringA("WM_PAINT\n");
         } break;
         
         default:
@@ -55,50 +195,74 @@ int CALLBACK WinMain(HINSTANCE Instance,
                      int showCode)
 {
     WNDCLASS WindowClass = {};
-    WindowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
-    WindowClass.lpfnWndProc = MainWindowCallBack;
+	
+	Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
+    WindowClass.style = CS_HREDRAW|CS_VREDRAW;
+    WindowClass.lpfnWndProc = Win32MainWindowCallBack;
     WindowClass.hInstance = Instance;
-    WindowClass.lpszClassName = "Bakaryu";
-    if(RegisterClass(&WindowClass))
+    WindowClass.lpszClassName = "Dude";
+    
+	if(RegisterClassA(&WindowClass))
     {
-        HWND WindowHandle = CreateWindowEx(0,
-                                           WindowClass.lpszClassName,
-                                           "99",
-                                           WS_OVERLAPPEDWINDOW|WS_VISIBLE,
-                                           CW_USEDEFAULT,
-                                           CW_USEDEFAULT,
-                                           CW_USEDEFAULT,
-                                           CW_USEDEFAULT,
-                                           0,
-                                           0,
-                                           Instance,
-                                           0);
+        HWND WindowHandle = CreateWindowExA(0,
+											WindowClass.lpszClassName,
+											"99",
+											WS_OVERLAPPEDWINDOW|WS_VISIBLE,
+											CW_USEDEFAULT,
+											CW_USEDEFAULT,
+											CW_USEDEFAULT,
+											CW_USEDEFAULT,
+											0,
+											0,
+											Instance,
+											0);
         if(WindowHandle)
         {
-            Running = true;
-            while(Running)
+			int XOffset = 0;
+			int YOffset = 0;
+			
+            GlobalRunning = true;
+            while(GlobalRunning)
             {
+				// @NOTE(mehdi): Message has been declare in the scope if 
+				// this while to avoid someone else modifing it.  
+				
                 MSG Message;
-                BOOL MessageResult = GetMessage(&Message, 0, 0, 0);
-                if(MessageResult > 0)
-                {
-                    TranslateMessage(&Message);
+				while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
+				{
+					if(Message.message == WM_QUIT)
+					{
+						GlobalRunning = false;
+					}
+					TranslateMessage(&Message);
                     DispatchMessage(&Message);
-                }
-                else
-                {
-                    break;
-                }
+				}
+                
+                RenderGradient(GlobalBackBuffer, XOffset, YOffset);
+				
+				HDC DeviceContext = GetDC(WindowHandle);
+				
+				win32_window_dimension Dimension = Win32GetWindowDimension(WindowHandle);
+				Win32DisplayBufferInWindow(DeviceContext,
+										   Dimension.Width, 
+										   Dimension.Height,
+										   GlobalBackBuffer,
+										   0, 0,
+										   Dimension.Width, 
+										   Dimension.Height);
+				ReleaseDC(WindowHandle, DeviceContext);
+				++XOffset;
+				YOffset += 2;
             }
         }
         else
         {
-            //TODO(MEHDI): Logging
+            //TODO(mehdi): Logging
         }
     }
     else
     {
-        //TODO(MEHDI): Logging
+        //TODO(mehdi): Logging
     }
     
     return (0);
